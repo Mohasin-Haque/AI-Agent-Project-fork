@@ -121,13 +121,34 @@ Response:
 
 ### Escalation Endpoint
 
+
+  Note: the escalation endpoint now attempts to send an email with full details (reporter name, email, phone, search query, comments) to the configured escalation address. By default this POC sends to `airfan@effor.tech` unless you set `ESCALATION_TARGET_EMAIL`.
+
+  Environment variables for email (optional, for live sending):
+
+  ```
+  SMTP_HOST=smtp.example.com
+  SMTP_PORT=587
+  SMTP_USER=you@example.com
+  SMTP_PASS=your-smtp-password
+  FROM_EMAIL=no-reply@example.com
+  ESCALATION_TARGET_EMAIL=airfan@effor.tech
+  ```
+
+  If SMTP settings are not provided the backend will write the full email payload to `escalation_emails.log` for manual processing.
 **POST** `/escalate`
+
+> Frontend now sends the originating `system` field so the backend can route the ticket to the appropriate team.  
+> - `Compass` / `Compass AML` → **AML team**  
+> - `SDK` → **Digital team**  
+> - all other systems (Finacle, NEFT, RTGS, etc.) default to **CBS**
 
 Request:
 ```json
 {
   "issue_id": "CBS-101",
-  "user_comments": "Tried all steps"
+  "user_comments": "Tried all steps",
+  "system": "Compass AML"
 }
 ```
 
@@ -135,8 +156,8 @@ Response:
 ```json
 {
   "status": "ESCALATED",
-  "ticket_id": "CBS-54321",
-  "message": "Issue escalated to CBS support team"
+  "ticket_id": "AML-54321",
+  "message": "Issue escalated to AML support team"
 }
 ```
 

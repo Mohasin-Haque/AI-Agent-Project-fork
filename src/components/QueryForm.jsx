@@ -10,7 +10,8 @@ export default function QueryForm({ setResponse }) {
 
     setLoading(true);
     const data = await queryIssue(query);
-    setResponse(data);
+    // include the original search query so downstream components can include it in escalations
+    setResponse({ ...data, search_query: query });
     setLoading(false);
   };
 

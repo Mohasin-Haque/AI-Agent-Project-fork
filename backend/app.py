@@ -1,5 +1,7 @@
 import json
 import os
+import smtplib
+from email.message import EmailMessage
 import faiss
 import numpy as np
 from fastapi import FastAPI
@@ -77,6 +79,11 @@ class QueryRequest(BaseModel):
 class EscalationRequest(BaseModel):
     issue_id: str
     user_comments: str | None = None
+    system: str | None = None
+    reporter_name: str | None = None
+    reporter_email: str | None = None
+    reporter_phone: str | None = None
+    search_query: str | None = None
 
 # -----------------------------
 # Query API
@@ -105,6 +112,7 @@ def query_issue(req: QueryRequest):
 
     return {
         "issue_id": issue.get("issue_id"),
+        "system": issue.get("system"),
         "identified_issue": identified_issue,
         "root_cause": issue.get("root_cause", ""),
         "resolution_steps": issue.get("resolution_steps", []),
@@ -123,13 +131,81 @@ def escalate_issue(req: EscalationRequest):
     Future:
     - ServiceNow / Remedy
     - Email
-    - CBS Ticket
+    - team-specific ticketing
     """
 
-    ticket_id = f"CBS-{np.random.randint(10000, 99999)}"
+    # determine support team from the provided system string
+    team = "CBS"
+    if req.system:
+        s = req.system.lower()
+        if "compass" in s or "aml" in s:
+            team = "AML"
+        elif "sdk" in s:
+            team = "Digital"
+
+    ticket_id = f"{team}-{np.random.randint(10000, 99999)}"
+    message = f"Issue escalated to {team} support team"
+
+    # build email content with all details
+    body_lines = [
+        f"Ticket ID: {ticket_id}",
+        f"Target Team: {team}",
+        "",
+        "Reporter details:",
+        f"  Name: {req.reporter_name}",
+        f"  Email: {req.reporter_email}",
+        f"  Phone: {req.reporter_phone}",
+        "",
+        "Escalation details:",
+        f"  Issue ID: {req.issue_id}",
+        f"  System: {req.system}",
+        f"  Search Query: {req.search_query}",
+        f"  User Comments: {req.user_comments}",
+        "",
+        "Please see the matched issue and resolution steps in the portal."
+    ]
+    body = "\n".join(str(l) for l in body_lines)
+
+    email_sent = False
+
+    # POC: send email to configured target or fallback address
+    to_address = os.getenv("ESCALATION_TARGET_EMAIL", "airfan@effor.tech")
+    smtp_host = os.getenv("SMTP_HOST")
+    smtp_port = int(os.getenv("SMTP_PORT", "587")) if os.getenv("SMTP_PORT") else None
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_pass = os.getenv("SMTP_PASS")
+    from_addr = os.getenv("FROM_EMAIL", smtp_user or f"no-reply@{os.getenv('HOSTNAME','local')}")
+
+    if smtp_host and smtp_port and smtp_user and smtp_pass:
+        try:
+            msg = EmailMessage()
+            msg["Subject"] = f"Escalation: {req.issue_id} -> {team} ({ticket_id})"
+            msg["From"] = from_addr
+            msg["To"] = to_address
+            msg.set_content(body)
+
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                server.starttls()
+                server.login(smtp_user, smtp_pass)
+                server.send_message(msg)
+
+            email_sent = True
+        except Exception as e:
+            # fallback: write to a local log file for inspection
+            with open("escalation_email_errors.log", "a", encoding="utf-8") as fh:
+                fh.write(f"{ticket_id} - email send failed: {e}\n")
+                fh.write(body + "\n\n")
+            email_sent = False
+    else:
+        # SMTP not configured: save to local file for manual processing
+        with open("escalation_emails.log", "a", encoding="utf-8") as fh:
+            fh.write(f"{ticket_id} - SMTP not configured, saving payload:\n")
+            fh.write(body + "\n\n")
 
     return {
         "status": "ESCALATED",
         "ticket_id": ticket_id,
-        "message": "Issue escalated to CBS support team"
+        "message": message,
+        "email_sent": email_sent,
+        "target_team": team
     }
